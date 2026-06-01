@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Admin Panel - Profit Pilot</title>
+  <style>
+    body { font-family: sans-serif; background: #0d1117; color: #fff; padding: 30px; margin: 0;}
+    h1, h3 { color: #e2e8f0; }
+    .card { background: #161b22; padding: 25px; border-radius: 8px; margin-bottom: 25px; border: 1px solid #21293a;}
+    input, button { padding: 12px; margin-right: 8px; border-radius: 6px; border: 1px solid #21293a; background: #0d1117; color: white;}
+    button { background: #2563eb; color: #fff; border: none; cursor: pointer; font-weight: bold;}
+    button:hover { opacity: 0.9; }
+    table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+    th, td { padding: 12px; border-bottom: 1px solid #21293a; text-align: left; font-size: 14px;}
+    th { background: #1c2230; color: #64748b; text-transform: uppercase; font-size: 12px;}
+    .approve { background: #22c55e; }
+    .reject { background: #ef4444; }
+  </style>
+</head>
+<body>
+  <h1>Admin Dashboard</h1>
+  
+  <div id="login-sec" class="card" style="max-width: 400px;">
+    <h3>Admin Login</h3>
+    <input type="text" id="username" placeholder="Username (admin)" style="width: 100%; margin-bottom: 10px; box-sizing: border-box;">
+    <input type="password" id="password" placeholder="Password (admin123)" style="width: 100%; margin-bottom: 10px; box-sizing: border-box;">
+    <button onclick="login()" style="width: 100%;">Login</button>
+    <p id="login-msg" style="color: #ef4444; font-size: 14px; margin-top: 10px;"></p>
+  </div>
+
+  <div id="dashboard-sec" style="display: none;">
+    <button onclick="logout()" style="background: transparent; border: 1px solid #ef4444; color: #ef4444; margin-bottom: 20px;">Logout</button>
+    <button onclick="fetchData()" style="margin-bottom: 20px;">Refresh Data</button>
+
+    <div class="card">
+      <h3>Pending Withdrawals</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>User ID</th>
+            <th>Amount</th>
+            <th>Bank Details</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody id="tx-body">
+        </tbody>
+      </table>
+    </div>
+    
+    <div class="card">
+      <h3>All Users</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>User ID</th>
+            <th>Name</th>
+            <th>Balance</th>
+            <th>Mobile</th>
+          </tr>
+        </thead>
+        <tbody id="users-body">
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    let token = localStorage.getItem('admin_token');
+    
+    if (token) {
+      document.getElementById('login-sec').style.display = 'none';
+      document.getElementById('dashboard-sec').style.display = 'block';
+      fetchData();
+    }
+
+    async function login() {
+      const u = document.getElementById('username').value;
+      const p = document.getElementById('password').value;
+      const res = await fetch('/api/v1/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: u, password: p })
+      });
+      const data = await res.json();
+      if (data.success) {
+        localStorage.setItem('admin_token', data.token);
+        token = data.token;
+        document.getElementById('login-sec').style.display = 'none';
+        document.getElementById('dashboard-sec').style.display = 'block';
+        fetchData();
+      } else {
+        document.getElementById('login-msg').innerText = "Login failed! Check credentials.";
+      }
+    }
+
+    function logout() {
+      localStorage.removeItem('admin_token');
+      location.reload();
+    }
+
+    async function fetchData() {
+      // Fetch Transactions
+      try {
+        const txRes = await fetch('/api/v1/admin/transactions', { headers: { 'Authorization': 'Bearer ' + token } });
+        const txData = await txRes.json();
+        
+        const tbody = document.getElementById('tx-body');
+        tbody.innerHTML = '';
+        if (txData.transactions && txData.transactions.length > 0) {
+          let hasPending = false;
+          txData.transactions.forEach(tx => {
+            if (tx.status === 'pending' && tx.type === 'withdrawal') {
+              hasPending = true;
+              tbody.innerHTML += `
+                <tr>
+                  <td>${new Date(tx.createdAt).toLocaleString()}</td>
+                  <td>${tx.userId}</td>
+                  <td style="color:#ef4444; font-weight:bold;">₹${tx.amount}</td>
+                  <td>${tx.bankDetails}</td>
+                  <td>
+                    <button class="approve" onclick="action('${tx._id}', 'approve')">Approve</button>
+                    <button class="reject" onclick="action('${tx._id}', 'reject')">Reject</button>
+                  </td>
+                </tr>
+              `;
+            }
+          });
+          if(!hasPending) tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;">No pending withdrawals</td></tr>`;
+        } else {
+          tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;">No pending withdrawals</td></tr>`;
+        }
+
+        // Fetch Users
+        const uRes = await fetch('/api/v1/admin/users', { headers: { 'Authorization': 'Bearer ' + token } });
+        const uData = await uRes.json();
+        const ubody = document.getElementById('users-body');
+        ubody.innerHTML = '';
+        if (uData.users && uData.users.length > 0) {
+          uData.users.forEach(u => {
+            ubody.innerHTML += `
+              <tr>
+                <td>${u.userId}</td>
+                <td>${u.username}</td>
+                <td style="color:#22c55e; font-weight:bold;">₹${u.balance}</td>
+                <td>${u.mobile}</td>
+              </tr>
+            `;
+          });
+        }
+      } catch(e) {
+        console.error(e);
+        if(e.status === 401) logout();
+      }
+    }
+
+    async function action(txId, type) {
+      if (!confirm('Are you sure you want to ' + type + ' this withdrawal?')) return;
+      const res = await fetch('/api/v1/admin/withdraw/' + type, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+        body: JSON.stringify({ transactionId: txId })
+      });
+      const data = await res.json();
+      alert(data.message);
+      fetchData();
+    }
+  </script>
+</body>
+</html>
